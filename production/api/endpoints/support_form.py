@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 
 from production.api.dependencies import get_db_pool, get_kafka_producer
@@ -17,12 +17,40 @@ settings = get_settings()
 router = APIRouter()
 
 
+async def publish_to_kafka(form: SupportFormRequest, ticket: dict, customer: dict, conversation: dict):
+    """Background task to publish message to Kafka."""
+    try:
+        producer = await get_producer()
+        await producer.send(
+            settings.KAFKA_TOPIC_INCOMING,
+            json.dumps({
+                "customer_identifier": form.email,
+                "identifier_type": "email",
+                "channel": "web_form",
+                "content": form.message,
+                "subject": form.subject,
+                "metadata": {
+                    "name": form.name,
+                    "category": form.category.value,
+                    "priority": form.priority.value,
+                    "ticket_number": ticket["ticket_number"],
+                    "customer_id": str(customer["id"]),
+                    "conversation_id": str(conversation["id"]),
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }).encode("utf-8"),
+        )
+    except Exception as e:
+        logger.warning(f"Kafka publish failed (background): {e}")
+
+
 @router.post("/support/form", status_code=201, response_model=SupportFormResponse)
 async def submit_support_form(
     form: SupportFormRequest,
+    background_tasks: BackgroundTasks,
     pool=Depends(get_db_pool),
 ):
-    """Accept a web support form submission. Creates ticket and returns ticket ID within 500ms."""
+    """Accept a web support form submission. Creates ticket and returns ticket ID within 100ms."""
     try:
         # 1. Resolve or create customer
         customer = await customers.get_customer_by_email(pool, form.email)
@@ -69,33 +97,8 @@ async def submit_support_form(
         if not ticket:
             raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
 
-        # 5. Publish to Kafka for async agent processing (Fire and forget for speed)
-        try:
-            producer = await get_producer()
-            # We don't await send_and_wait to keep the response fast (< 500ms)
-            # The producer.send returns a future, and Kafka client handles it in background
-            await producer.send(
-                settings.KAFKA_TOPIC_INCOMING,
-                json.dumps({
-                    "customer_identifier": form.email,
-                    "identifier_type": "email",
-                    "channel": "web_form",
-                    "content": form.message,
-                    "subject": form.subject,
-                    "metadata": {
-                        "name": form.name,
-                        "category": form.category.value,
-                        "priority": form.priority.value,
-                        "ticket_number": ticket["ticket_number"],
-                        "customer_id": str(customer["id"]),
-                        "conversation_id": str(conversation["id"]),
-                    },
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }).encode("utf-8"),
-            )
-        except Exception as e:
-            # Kafka publish failure is non-blocking — ticket already created
-            logger.warning(f"Kafka publish failed (non-blocking): {e}")
+        # 5. Move Kafka publishing to background task for maximum speed
+        background_tasks.add_task(publish_to_kafka, form, ticket, customer, conversation)
 
         return SupportFormResponse(
             ticket_id=ticket["ticket_number"],
