@@ -18,8 +18,9 @@ router = APIRouter()
 
 
 async def publish_to_kafka(form: SupportFormRequest, ticket: dict, customer: dict, conversation: dict):
-    """Background task to publish message to Kafka."""
+    """Background task to publish message to Kafka — including lazy init."""
     try:
+        from production.kafka_client import get_producer
         producer = await get_producer()
         await producer.send(
             settings.KAFKA_TOPIC_INCOMING,
