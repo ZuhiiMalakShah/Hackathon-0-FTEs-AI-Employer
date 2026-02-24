@@ -116,7 +116,7 @@ The agent creates tickets, searches a knowledge base using semantic search, form
 
 ### AI Agent with 5 Tools
 - `search_knowledge_base` — Semantic search over product docs using pgvector (cosine similarity)
-- `create_ticket` — Auto-generates `TKT-XXXX` tickets before every response
+- `create_ticket` — Auto-generates `MZ-XXXX` tickets before every response
 - `get_customer_history` — Retrieves past conversations across all channels
 - `escalate_to_human` — Triggered by guardrail violations or explicit customer request
 - `send_response` — Channel-aware formatting (formal for email, concise for WhatsApp, semi-formal for web)
@@ -235,7 +235,7 @@ curl -X POST http://localhost:8000/api/v1/support/form \
 
 ```json
 {
-  "ticket_id": "TKT-0006",
+  "ticket_id": "MZ-0006",
   "status": "received",
   "message": "Your support request has been received. Our team will respond within 30 minutes.",
   "created_at": "2026-02-08T14:30:00Z"
@@ -270,13 +270,13 @@ PostgreSQL **is** the CRM. Eight tables, zero external dependencies:
 | `customer_identifiers` | Cross-channel identity matching | customer_id, identifier_type, identifier_value, channel |
 | `conversations` | Conversation threads | customer_id, channel, status, sentiment_score |
 | `messages` | All messages (in + out) | conversation_id, direction, role, content, delivery_status |
-| `tickets` | Support tickets (`TKT-XXXX`) | ticket_number, category, priority, status, source_channel |
+| `tickets` | Support tickets (`MZ-XXXX`) | ticket_number, category, priority, status, source_channel |
 | `knowledge_base` | Product docs + pgvector embeddings | title, content, category, embedding (vector 1536) |
 | `channel_configs` | Per-channel settings | channel, tone, max_response_length |
 | `agent_metrics` | Time-series performance data | metric_type, channel, value, recorded_at |
 
 **Notable features:**
-- Auto-generated `TKT-XXXX` ticket numbers via PostgreSQL trigger + sequence
+- Auto-generated `MZ-XXXX` ticket numbers via PostgreSQL trigger + sequence
 - HNSW index on knowledge base embeddings for fast vector search
 - `updated_at` triggers on all mutable tables
 - CHECK constraints enforce valid enums at the database level

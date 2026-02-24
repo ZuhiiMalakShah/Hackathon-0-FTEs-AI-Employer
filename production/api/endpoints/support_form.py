@@ -9,8 +9,11 @@ from fastapi.responses import JSONResponse
 from production.api.dependencies import get_db_pool, get_kafka_producer
 from production.schemas.support_form import SupportFormRequest, SupportFormResponse
 from production.database.queries import customers, conversations, messages, tickets
+from production.kafka_client import get_producer
+from production.config import get_settings
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 router = APIRouter()
 
 
@@ -66,13 +69,12 @@ async def submit_support_form(
         if not ticket:
             raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
 
-        # 5. Publish to Kafka for async agent processing
+        # 5. Publish to Kafka for async agent processing (Fire and forget for speed)
         try:
-            from production.kafka_client import get_producer
-            from production.config import get_settings
-            settings = get_settings()
             producer = await get_producer()
-            await producer.send_and_wait(
+            # We don't await send_and_wait to keep the response fast (< 500ms)
+            # The producer.send returns a future, and Kafka client handles it in background
+            await producer.send(
                 settings.KAFKA_TOPIC_INCOMING,
                 json.dumps({
                     "customer_identifier": form.email,
